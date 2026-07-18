@@ -1,5 +1,7 @@
 # Ready-to-Paste Prompt
 
+For the `tree-decompose` skill from https://github.com/lujo18/tree-decompose-development.
+
 Copy and paste this into OpenCode to trigger the Tree Decompose Development Engine on any feature request.
 
 ## Default invocation

@@ -1,6 +1,22 @@
 # Tree Decompose Development Engine
 
+**Repository:** https://github.com/lujo18/tree-decompose-development
+
 A self-contained OpenCode Skill that recursively decomposes a single user prompt into plans, sub-plans, and concrete code files. It uses a local state ledger to track progress across multi-layer branch depths and dispatches isolated subagents so lightweight models (e.g. Kimi K3, Fable) can build complex systems without context drift.
+
+## Install
+
+Install directly from GitHub with the `skills` CLI:
+
+```bash
+npx skills add lujo18/tree-decompose-development --skill tree-decompose
+```
+
+Or install globally:
+
+```bash
+npx skills add lujo18/tree-decompose-development --skill tree-decompose -g
+```
 
 ## What it does
 
@@ -13,14 +29,14 @@ A self-contained OpenCode Skill that recursively decomposes a single user prompt
 - **Parallel builders** for independent nodes (`--parallel N`).
 - **Security defaults**: path traversal protection, safe diagnostic execution, prompt sanitization, circular-dependency detection, contract-drift detection.
 
-## Install
+## Manual install
 
 Copy or symlink this entire folder into your project's OpenCode skills path:
 
 ```bash
 # From your project root:
 mkdir -p .opencode/skills
-cp -r /path/to/tree-decompose .opencode/skills/
+cp -r skills/tree-decompose .opencode/skills/
 ```
 
 Then start OpenCode. The skill will appear in the native `skill` tool list.

@@ -2,7 +2,11 @@
 
 ## Tree Decompose Development Engine
 
-This repository contains a self-contained OpenCode Skill at `skills/tree-decompose/` for recursive hierarchical task decomposition. It is installable with `npx skills add <owner>/<repo> --skill tree-decompose`, or manually by copying `skills/tree-decompose/` to `.opencode/skills/` or `.agents/skills/`. When a user asks to build a complex multi-file feature, load the `tree-decompose` skill and follow its execution protocol.
+This repository contains a self-contained OpenCode Skill at `skills/tree-decompose/` for recursive hierarchical task decomposition.
+
+**Repository:** https://github.com/lujo18/tree-decompose-development
+
+It is installable with `npx skills add lujo18/tree-decompose-development --skill tree-decompose`, or manually by copying `skills/tree-decompose/` to `.opencode/skills/` or `.agents/skills/`. When a user asks to build a complex multi-file feature, load the `tree-decompose` skill and follow its execution protocol.
 
 ### What the skill does
 

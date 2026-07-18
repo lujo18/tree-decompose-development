@@ -15,7 +15,9 @@ metadata:
 
 I transform a single high-level user request into a fully implemented multi-file codebase by recursively decomposing it into plans, sub-plans, and atomic implementation nodes. I use a local state engine to avoid token bloat, track progress across depths, and dispatch isolated `@general` subagents for each leaf. I run diagnostics and self-healing loops until the generated code compiles and matches contracts.
 
-This skill is fully self-contained in the `tree-decompose/` folder. It can be copied manually, installed with `npx skills add <owner>/<repo> --skill tree-decompose`, or used directly from this repo.
+This skill is fully self-contained in the `tree-decompose/` folder. It can be copied manually, installed with `npx skills add lujo18/tree-decompose-development --skill tree-decompose`, or used directly from this repo.
+
+**Repository:** https://github.com/lujo18/tree-decompose-development
 
 ### Key capabilities
 

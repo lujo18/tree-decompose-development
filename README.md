@@ -1,5 +1,7 @@
 # Tree Decompose Development Engine
 
+**Repository:** https://github.com/lujo18/tree-decompose-development
+
 A self-contained OpenCode / agent skill that recursively decomposes a single user prompt into plans, sub-plans, and concrete code files. It uses a local state ledger to track progress across multi-layer branch depths and dispatches isolated subagents so lightweight models can build complex systems without context drift.
 
 ## Install with `npx skills`
@@ -7,8 +9,7 @@ A self-contained OpenCode / agent skill that recursively decomposes a single use
 The easiest way to install this skill into any project is with the open agent skills CLI:
 
 ```bash
-# Install from GitHub (replace <owner>/<repo> with your repo)
-npx skills add <owner>/<repo> --skill tree-decompose
+npx skills add lujo18/tree-decompose-development --skill tree-decompose
 ```
 
 For OpenCode specifically, it will be placed at `.agents/skills/tree-decompose/` (project) or `~/.config/opencode/skills/tree-decompose/` (global). OpenCode discovers it automatically.
@@ -17,13 +18,13 @@ For OpenCode specifically, it will be placed at `.agents/skills/tree-decompose/`
 
 ```bash
 # Global install
-npx skills add <owner>/<repo> --skill tree-decompose -g
+npx skills add lujo18/tree-decompose-development --skill tree-decompose -g
 
 # Install to OpenCode only
-npx skills add <owner>/<repo> --skill tree-decompose -a opencode
+npx skills add lujo18/tree-decompose-development --skill tree-decompose -a opencode
 
 # Install all skills from this repo
-npx skills add <owner>/<repo> --all
+npx skills add lujo18/tree-decompose-development --all
 ```
 
 ## Manual install
