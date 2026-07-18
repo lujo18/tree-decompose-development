@@ -1,0 +1,307 @@
+{
+  "project_name": "viral-app-factory",
+  "project_scope": "Build a state-driven multi-agent viral app factory with Discord login, project templates, deployment hooks, and Stripe billing.",
+  "contracts_hash": "",
+  "nodes": [
+    {
+      "id": "node_000",
+      "path": "src/types/index.ts",
+      "depth_level": 1,
+      "parent_id": null,
+      "type": "file",
+      "kind": "contract",
+      "dependencies": [],
+      "contract_signatures": [
+        "export interface User { id: string; email: string; name: string; createdAt: Date; }",
+        "export interface Project { id: string; ownerId: string; name: string; template: ProjectTemplate; status: ProjectStatus; }",
+        "export enum ProjectStatus { Draft = 'draft', Building = 'building', Deployed = 'deployed', Failed = 'failed' }",
+        "export interface ProjectTemplate { id: string; name: string; stack: string; defaultConfig: Record<string, unknown>; }",
+        "export interface DeploymentHook { id: string; projectId: string; provider: 'vercel' | 'railway' | 'netlify'; config: Record<string, unknown>; }",
+        "export interface BillingSubscription { id: string; userId: string; stripeCustomerId: string; plan: string; status: 'active' | 'canceled' | 'past_due'; }",
+        "export interface AuthSession { token: string; user: User; expiresAt: Date; }"
+      ],
+      "description": "Define global shared types, interfaces, and enums used by every other module.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_001",
+      "path": "src/lib/oauth/discord.ts",
+      "depth_level": 2,
+      "parent_id": "node_010",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000"
+      ],
+      "contract_signatures": [
+        "export function getDiscordAuthUrl(): string",
+        "export function fetchDiscordUser(code: string): Promise<Pick<User, 'id' | 'email' | 'name'>>"
+      ],
+      "description": "Low-level Discord OAuth2 helper: build authorization URL and exchange code for user profile.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_002",
+      "path": "src/lib/templates/registry.ts",
+      "depth_level": 2,
+      "parent_id": "node_011",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000"
+      ],
+      "contract_signatures": [
+        "export function listTemplates(): ProjectTemplate[]",
+        "export function getTemplate(id: string): ProjectTemplate | undefined"
+      ],
+      "description": "Static template registry with default configurations for supported app stacks.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_003",
+      "path": "src/lib/hooks/vercel.ts",
+      "depth_level": 2,
+      "parent_id": "node_012",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000"
+      ],
+      "contract_signatures": [
+        "export function deployToVercel(projectId: string, config: Record<string, unknown>): Promise<DeploymentHook>"
+      ],
+      "description": "Vercel deployment adapter that calls the Vercel API and returns a DeploymentHook record.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_004",
+      "path": "src/lib/stripe/client.ts",
+      "depth_level": 2,
+      "parent_id": "node_013",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000"
+      ],
+      "contract_signatures": [
+        "export function createStripeCustomer(user: User): Promise<string>",
+        "export function createSubscription(customerId: string, plan: string): Promise<BillingSubscription>"
+      ],
+      "description": "Stripe API client wrapper for customer and subscription creation.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_005",
+      "path": "src/services/auth/session.ts",
+      "depth_level": 3,
+      "parent_id": "node_010",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000",
+        "node_001"
+      ],
+      "contract_signatures": [
+        "export function validateSession(token: string): Promise<AuthSession | null>"
+      ],
+      "description": "Validate bearer tokens and return enriched AuthSession objects using the Discord OAuth helper.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_006",
+      "path": "src/services/project/create.ts",
+      "depth_level": 3,
+      "parent_id": "node_011",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000",
+        "node_002"
+      ],
+      "contract_signatures": [
+        "export function createProject(ownerId: string, templateId: string, name: string): Promise<Project>"
+      ],
+      "description": "Create a new Project by resolving the template from the registry and applying default config.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_007",
+      "path": "src/services/deployment/deploy.ts",
+      "depth_level": 3,
+      "parent_id": "node_012",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000",
+        "node_003"
+      ],
+      "contract_signatures": [
+        "export function deployProject(projectId: string): Promise<DeploymentHook>"
+      ],
+      "description": "Route deployment requests to the correct provider adapter and persist the resulting hook.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_008",
+      "path": "src/services/billing/subscription.ts",
+      "depth_level": 3,
+      "parent_id": "node_013",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000",
+        "node_004"
+      ],
+      "contract_signatures": [
+        "export function subscribeUser(user: User, plan: string): Promise<BillingSubscription>"
+      ],
+      "description": "Orchestrate Stripe customer creation and subscription setup for a user.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_009",
+      "path": "src/components/project-card.tsx",
+      "depth_level": 3,
+      "parent_id": "node_014",
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_000"
+      ],
+      "contract_signatures": [
+        "export function ProjectCard(props: { project: Project }): JSX.Element"
+      ],
+      "description": "Reusable React component that displays a project summary card.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_010",
+      "path": "src/services/auth/index.ts",
+      "depth_level": 4,
+      "parent_id": null,
+      "type": "file",
+      "kind": "contract",
+      "dependencies": [
+        "node_005"
+      ],
+      "contract_signatures": [
+        "export { validateSession } from './session';"
+      ],
+      "description": "Auth domain barrel export.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_011",
+      "path": "src/services/project/index.ts",
+      "depth_level": 4,
+      "parent_id": null,
+      "type": "file",
+      "kind": "contract",
+      "dependencies": [
+        "node_006"
+      ],
+      "contract_signatures": [
+        "export { createProject } from './create';"
+      ],
+      "description": "Project domain barrel export.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_012",
+      "path": "src/services/deployment/index.ts",
+      "depth_level": 4,
+      "parent_id": null,
+      "type": "file",
+      "kind": "contract",
+      "dependencies": [
+        "node_007"
+      ],
+      "contract_signatures": [
+        "export { deployProject } from './deploy';"
+      ],
+      "description": "Deployment domain barrel export.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_013",
+      "path": "src/services/billing/index.ts",
+      "depth_level": 4,
+      "parent_id": null,
+      "type": "file",
+      "kind": "contract",
+      "dependencies": [
+        "node_008"
+      ],
+      "contract_signatures": [
+        "export { subscribeUser } from './subscription';"
+      ],
+      "description": "Billing domain barrel export.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    },
+    {
+      "id": "node_014",
+      "path": "src/app/page.tsx",
+      "depth_level": 4,
+      "parent_id": null,
+      "type": "file",
+      "kind": "implementation",
+      "dependencies": [
+        "node_009",
+        "node_010",
+        "node_011",
+        "node_012",
+        "node_013"
+      ],
+      "contract_signatures": [
+        "export default function DashboardPage(): JSX.Element"
+      ],
+      "description": "Main dashboard UI that composes auth, project, deployment, billing services and the project card.",
+      "status": "idle",
+      "error_log": null,
+      "retry_count": 0,
+      "metadata": {}
+    }
+  ]
+}

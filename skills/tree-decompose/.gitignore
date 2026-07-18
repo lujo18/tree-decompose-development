@@ -1,0 +1,15 @@
+# Runtime artifacts
+.prompts/
+outputs/
+state/ledger.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
