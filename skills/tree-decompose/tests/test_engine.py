@@ -197,5 +197,214 @@ class ExpanderTests(unittest.TestCase):
         self.assertEqual(nodes[1].depth_level, 1)
 
 
+class ReasoningLayerTests(unittest.TestCase):
+    """Tests for the reasoning artifact, effort dial, and context deflation."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_reasoning_kind_valid(self) -> None:
+        node = ledger_mod.Node(
+            id="r1",
+            path="src/reason.ts",
+            depth_level=1,
+            parent_id=None,
+            type="file",
+            kind="reasoning",
+        )
+        self.assertEqual(node.kind, "reasoning")
+
+    def test_invalid_effort_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ledger_mod.Node(
+                id="n1",
+                path="src/a.ts",
+                depth_level=1,
+                parent_id=None,
+                type="file",
+                kind="implementation",
+                effort="ultra",
+            )
+
+    def test_thinking_path_and_effort_roundtrip(self) -> None:
+        node = ledger_mod.Node(
+            id="n1",
+            path="src/a.ts",
+            depth_level=1,
+            parent_id=None,
+            type="file",
+            kind="implementation",
+            thinking_path=".decompose/thinking/n1.yaml",
+            effort="xhigh",
+        )
+        d = node.to_dict()
+        self.assertEqual(d["thinking_path"], ".decompose/thinking/n1.yaml")
+        self.assertEqual(d["effort"], "xhigh")
+        restored = ledger_mod.Node.from_dict(d)
+        self.assertEqual(restored.thinking_path, ".decompose/thinking/n1.yaml")
+        self.assertEqual(restored.effort, "xhigh")
+
+    def test_reasoning_required_nodes_gating(self) -> None:
+        """Only reasoning-kind nodes OR contracts with >=3 dependents trigger."""
+        data = {
+            "project_name": "test",
+            "project_scope": "",
+            "nodes": [
+                {
+                    "id": "root_contract",
+                    "path": "src/types.ts",
+                    "depth_level": 1,
+                    "parent_id": None,
+                    "type": "file",
+                    "kind": "contract",
+                    "dependencies": [],
+                },
+                {
+                    "id": "impl_a",
+                    "path": "src/a.ts",
+                    "depth_level": 2,
+                    "parent_id": "root_contract",
+                    "type": "file",
+                    "kind": "implementation",
+                    "dependencies": ["root_contract"],
+                },
+                {
+                    "id": "impl_b",
+                    "path": "src/b.ts",
+                    "depth_level": 2,
+                    "parent_id": "root_contract",
+                    "type": "file",
+                    "kind": "implementation",
+                    "dependencies": ["root_contract"],
+                },
+                {
+                    "id": "impl_c",
+                    "path": "src/c.ts",
+                    "depth_level": 2,
+                    "parent_id": "root_contract",
+                    "type": "file",
+                    "kind": "implementation",
+                    "dependencies": ["root_contract"],
+                },
+                {
+                    "id": "explicit_reasoning",
+                    "path": "src/reason.ts",
+                    "depth_level": 1,
+                    "parent_id": None,
+                    "type": "file",
+                    "kind": "reasoning",
+                    "dependencies": [],
+                },
+                {
+                    "id": "low_dep_contract",
+                    "path": "src/low.ts",
+                    "depth_level": 1,
+                    "parent_id": None,
+                    "type": "file",
+                    "kind": "contract",
+                    "dependencies": [],
+                },
+            ],
+        }
+        ledger_path = Path(self.tmp) / "ledger.json"
+        ledger_path.write_text(json.dumps(data), encoding="utf-8")
+        ld = ledger_mod.Ledger.load(ledger_path)
+        targets = ld.reasoning_required_nodes()
+        ids = [n.id for n in targets]
+        self.assertIn("root_contract", ids)  # contract with 3 dependents
+        self.assertIn("explicit_reasoning", ids)  # explicit reasoning kind
+        self.assertNotIn("low_dep_contract", ids)  # contract with 0 dependents
+        self.assertNotIn("impl_a", ids)  # implementation node
+
+    def test_dependent_count(self) -> None:
+        data = {
+            "project_name": "test",
+            "project_scope": "",
+            "nodes": [
+                {"id": "a", "path": "a.ts", "depth_level": 1, "parent_id": None, "type": "file", "kind": "contract"},
+                {"id": "b", "path": "b.ts", "depth_level": 2, "parent_id": "a", "type": "file", "kind": "implementation", "dependencies": ["a"]},
+                {"id": "c", "path": "c.ts", "depth_level": 2, "parent_id": "a", "type": "file", "kind": "implementation", "dependencies": ["a"]},
+            ],
+        }
+        ledger_path = Path(self.tmp) / "ledger.json"
+        ledger_path.write_text(json.dumps(data), encoding="utf-8")
+        ld = ledger_mod.Ledger.load(ledger_path)
+        self.assertEqual(ld.dependent_count("a"), 2)
+        self.assertEqual(ld.dependent_count("b"), 0)
+
+    def test_thinking_artifact_parsing(self) -> None:
+        from engine import dispatcher
+
+        yaml_text = """node_id: n1
+target_path: src/a.ts
+selected: B
+rationale: B handles the edge case better.
+invariants:
+  - "TTL <= 5 min"
+  - "No blocking I/O"
+verdict: proceed
+"""
+        art = dispatcher.ThinkingArtifact.from_text(yaml_text)
+        self.assertEqual(art.selected, "B")
+        self.assertIn("TTL", art.invariants[0])
+        self.assertEqual(art.verdict, "proceed")
+
+    def test_builder_prompt_excludes_candidates(self) -> None:
+        """When thinking_path is set, builder sees selected + invariants, never candidates."""
+        from engine import dispatcher
+
+        # Create a fake thinking artifact
+        thinking_dir = Path(self.tmp) / "thinking"
+        thinking_dir.mkdir()
+        art_path = thinking_dir / "n1.yaml"
+        art_path.write_text(
+            "node_id: n1\nselected: A\nrationale: test\ninvariants:\n  - \"inv1\"\nverdict: proceed\n",
+            encoding="utf-8",
+        )
+
+        # Create a node with thinking_path set
+        node = ledger_mod.Node(
+            id="n1",
+            path="src/a.ts",
+            depth_level=1,
+            parent_id=None,
+            type="file",
+            kind="implementation",
+            thinking_path=str(art_path),
+        )
+
+        # Create contracts file
+        contracts_path = Path(self.tmp) / "contracts.ts"
+        contracts_path.write_text("export interface Foo {}", encoding="utf-8")
+
+        builder = dispatcher.PromptBuilder(Path(self.tmp) / "config", contracts_path, thinking_dir)
+        # Need a persona file
+        config_dir = Path(self.tmp) / "config"
+        config_dir.mkdir()
+        (config_dir / "builder.json").write_text(
+            json.dumps({"system_prompt": "test builder"}), encoding="utf-8"
+        )
+
+        prompt = builder.builder_prompt(node)
+        # Should contain the selected approach and invariants
+        self.assertIn("AUTHORITATIVE DECISION", prompt)
+        self.assertIn("selected: A" if False else "Selected approach: A", prompt)
+        self.assertIn("inv1", prompt)
+        # Should NOT contain candidate exploration
+        self.assertNotIn("candidates", prompt.lower())
+
+    def test_effort_language_injection(self) -> None:
+        from engine import dispatcher
+
+        builder = dispatcher.PromptBuilder(Path(self.tmp) / "config", None, None)
+        line = builder._effort_line("xhigh")
+        self.assertIn("xhigh", line)
+        self.assertIn("multistep reasoning", line.lower())
+        line_low = builder._effort_line("low")
+        self.assertIn("low", line_low)
+        self.assertIn("directly", line_low.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

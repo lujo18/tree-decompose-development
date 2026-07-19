@@ -23,7 +23,7 @@ from . import security
 
 
 def write_output(package_root: Path, output_path: Path, content: str) -> None:
-    outputs_root = package_root / "outputs"
+    outputs_root = package_root / ".decompose" / "outputs"
     safe_path = security.resolve_within_root(outputs_root, output_path)
     safe_path.parent.mkdir(parents=True, exist_ok=True)
     safe_path.write_text(content, encoding="utf-8")

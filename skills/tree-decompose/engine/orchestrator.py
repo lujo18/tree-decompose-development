@@ -8,6 +8,8 @@ and repairs failed nodes until the project is complete.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 import sys
 import threading
@@ -34,9 +36,6 @@ class Orchestrator:
         dry_run: bool = False,
     ) -> None:
         self.package_root = Path(package_root)
-        self.ledger_path = Path(ledger_path)
-        self.contracts_path = Path(contracts_path)
-        self.outputs_root = Path(outputs_root)
         self.project_root = Path(project_root)
         self.diagnostic_command = diagnostic_command
         self.max_retries = max_retries
@@ -44,15 +43,32 @@ class Orchestrator:
         self.dry_run = dry_run
         self.use_shell = False
         self._ledger_lock = threading.Lock()
+        self.default_effort: str = ledger_mod.DEFAULT_EFFORT
+
+        # All runtime state lives under a single .decompose/ workspace.
+        # This replaces the former scattered layout (state/, docs/thinking/,
+        # .prompts/, outputs/).
+        self.workspace = self.package_root / ".decompose"
+        self.ledger_path = Path(ledger_path)
+        self.contracts_path = Path(contracts_path)
+        self.outputs_root = Path(outputs_root)
+        self.thinking_dir = self.workspace / "thinking"
+        self.prompts_dir = self.workspace / "prompts"
+        self.backups_dir = self.workspace / "backups"
+        for d in (self.workspace, self.thinking_dir, self.prompts_dir, self.backups_dir):
+            os.makedirs(d, exist_ok=True)
 
         self.prompt_builder = dispatcher.PromptBuilder(
             self.package_root / "config",
             self.contracts_path,
+            self.thinking_dir,
         )
-        self.cmd_builder = dispatcher.OpenCodeCommandBuilder(self.package_root, dry_run=dry_run)
+        self.cmd_builder = dispatcher.OpenCodeCommandBuilder(
+            self.package_root, self.prompts_dir, dry_run=dry_run
+        )
 
         # Validate that persona config files are readable JSON.
-        for persona in ("architect", "builder", "validator", "integrator"):
+        for persona in ("architect", "builder", "validator", "integrator", "thinker", "critic"):
             try:
                 self.prompt_builder.load_persona(persona)
             except Exception as exc:
@@ -64,6 +80,11 @@ class Orchestrator:
         ledger = ledger_mod.Ledger.load(self.ledger_path)
         if ledger.has_circular_dependency():
             raise ValueError("Ledger contains a circular dependency")
+        # Apply CLI-default effort to nodes that still carry the schema default.
+        # Per-node effort set explicitly in the ledger is preserved.
+        for node in ledger.nodes.values():
+            if node.effort == ledger_mod.DEFAULT_EFFORT and self.default_effort != ledger_mod.DEFAULT_EFFORT:
+                node.effort = self.default_effort
         return ledger
 
     def save_ledger(self, ledger: ledger_mod.Ledger) -> None:
@@ -307,6 +328,145 @@ class Orchestrator:
             self.save_ledger(ledger)
         return ledger
 
+    def _thinking_artifact_path(self, node: ledger_mod.Node) -> Path:
+        """Canonical path for a node's thinking artifact."""
+        safe_id = node.id.replace("_", "-")
+        return self.thinking_dir / f"{safe_id}.yaml"
+
+    def dispatch_thinker(self, node: ledger_mod.Node, ledger: ledger_mod.Ledger) -> tuple[bool, str]:
+        """Run the thinker persona for a reasoning node."""
+        summary = self._plan_tree_summary(ledger, node)
+        prompt = self.prompt_builder.thinking_prompt(node, plan_tree_summary=summary)
+        output_path = security.resolve_within_root(
+            self.thinking_dir, f"{node.id.replace('_', '-')}-candidates.json"
+        )
+        command = self.cmd_builder.run_subagent_command(
+            persona="thinker",
+            prompt=prompt,
+            node_id=node.id,
+            output_path=output_path,
+        )
+        if self.dry_run:
+            print(f"[DRY-RUN] Would run thinker for {node.id}:\n{command}")
+            return True, '{"candidates":[{"id":"A","approach":"dry-run","pros":[],"cons":[],"edge_cases":[]}]}'
+        try:
+            result = subprocess.run(
+                command,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=240,
+            )
+            success = result.returncode == 0
+            combined = f"{result.stdout}\n{result.stderr}".strip()
+            return success, combined
+        except Exception as exc:
+            return False, str(exc)
+
+    def dispatch_critic(
+        self, node: ledger_mod.Node, candidates_json: str
+    ) -> tuple[bool, str, Optional[dispatcher.ThinkingArtifact]]:
+        """Run the critic persona for a reasoning node's candidates."""
+        prompt = self.prompt_builder.critic_prompt(node, candidates_json)
+        artifact_path = self._thinking_artifact_path(node)
+        command = self.cmd_builder.run_subagent_command(
+            persona="critic",
+            prompt=prompt,
+            node_id=node.id,
+            output_path=artifact_path,
+        )
+        if self.dry_run:
+            placeholder = (
+                f"node_id: {node.id}\n"
+                f"target_path: {node.path}\n"
+                "selected: A\n"
+                "rationale: DRY RUN - critic placeholder\n"
+                "invariants:\n"
+                "  - DRY RUN invariant\n"
+                "verdict: proceed\n"
+            )
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            artifact_path.write_text(placeholder, encoding="utf-8")
+            print(f"[DRY-RUN] Would run critic for {node.id}:\n{command}")
+            art = dispatcher.ThinkingArtifact.from_text(placeholder)
+            return True, placeholder, art
+        try:
+            result = subprocess.run(
+                command,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=240,
+            )
+            success = result.returncode == 0
+            combined = f"{result.stdout}\n{result.stderr}".strip()
+            artifact = None
+            if success and artifact_path.exists():
+                text = artifact_path.read_text(encoding="utf-8")
+                artifact = dispatcher.ThinkingArtifact.from_text(text)
+            return success, combined, artifact
+        except Exception as exc:
+            return False, str(exc), None
+
+    def run_reasoning_phase(self, ledger: ledger_mod.Ledger) -> ledger_mod.Ledger:
+        """Generate thinking artifacts for gating-rule-matched nodes before execution."""
+        targets = ledger.reasoning_required_nodes()
+        if not targets:
+            print("[*] No reasoning-required nodes; skipping thinking phase.")
+            return ledger
+
+        print(f"[*] Reasoning phase: {len(targets)} node(s) require thinking artifacts.")
+        for node in targets:
+            if self.dry_run and node.thinking_path:
+                # already has artifact in a previous dry-run; skip
+                continue
+            if not self.dry_run and node.thinking_path and Path(node.thinking_path).exists():
+                continue
+
+            print(f"[REASONING] {node.id} ({node.path}) effort={node.effort}")
+            with self._ledger_lock:
+                ledger.update_status(node.id, ledger_mod.STATUS_PROCESSING)
+                self.save_ledger(ledger)
+
+            t_ok, candidates_json = self.dispatch_thinker(node, ledger)
+            if not t_ok:
+                with self._ledger_lock:
+                    ledger.update_status(
+                        node.id,
+                        ledger_mod.STATUS_FAILED,
+                        error_log=f"Thinker failed: {candidates_json[:1000]}",
+                    )
+                    self.save_ledger(ledger)
+                continue
+
+            c_ok, c_logs, artifact = self.dispatch_critic(node, candidates_json)
+            if not c_ok or artifact is None:
+                with self._ledger_lock:
+                    ledger.update_status(
+                        node.id,
+                        ledger_mod.STATUS_FAILED,
+                        error_log=f"Critic failed: {c_logs[:1000]}",
+                    )
+                    self.save_ledger(ledger)
+                continue
+
+            artifact_path = self._thinking_artifact_path(node)
+            node.thinking_path = str(artifact_path)
+            with self._ledger_lock:
+                # Reasoning nodes (kind="reasoning") are done after producing
+                # their artifact — they exist only to produce decisions.
+                # Contract/implementation nodes that were gated still need to
+                # be executed by the builder, so leave them idle.
+                if node.kind == "reasoning":
+                    ledger.update_status(node.id, ledger_mod.STATUS_COMPLETED)
+                else:
+                    # Keep status as idle; the thinking_path is what matters.
+                    ledger.update_status(node.id, ledger_mod.STATUS_IDLE)
+                self.save_ledger(ledger)
+            print(f"    [OK] {node.id} -> {artifact_path}")
+
+        return ledger
+
     def run(self) -> int:
         ledger = self.load_ledger()
         current_hash = security.hash_file(self.contracts_path)
@@ -322,6 +482,11 @@ class Orchestrator:
 
         print(f"[*] Loaded ledger: {ledger.project_name}")
         print(f"    nodes={len(ledger.nodes)} depth={ledger.max_depth()}")
+
+        # Reasoning phase: produce thinking artifacts for gated decision nodes.
+        # Low effort skips the reasoning phase entirely.
+        if not ledger.is_complete():
+            ledger = self.run_reasoning_phase(ledger)
 
         if not ledger.is_complete():
             ledger = self.run_execution_phase(ledger)
@@ -357,6 +522,7 @@ def reset_ledger(ledger_path: Path) -> None:
         node.status = ledger_mod.STATUS_IDLE
         node.error_log = None
         node.retry_count = 0
+        node.thinking_path = None
     ledger.save(ledger_path)
     print(f"[+] Reset ledger: {ledger_path}")
 
@@ -364,13 +530,20 @@ def reset_ledger(ledger_path: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Tree Decompose Development Engine")
     default_root = Path(__file__).resolve().parent.parent
-    parser.add_argument("--ledger", type=Path, default=default_root / "state" / "ledger.json")
-    parser.add_argument("--contracts", type=Path, default=default_root / "docs" / "contracts.ts")
-    parser.add_argument("--outputs", type=Path, default=default_root / "outputs")
+    workspace = default_root / ".decompose"
+    parser.add_argument("--ledger", type=Path, default=workspace / "ledger.json")
+    parser.add_argument("--contracts", type=Path, default=workspace / "contracts.ts")
+    parser.add_argument("--outputs", type=Path, default=workspace / "outputs")
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--diagnostic", default=None, help="Diagnostic shell command")
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--parallel", type=int, default=1)
+    parser.add_argument(
+        "--effort",
+        choices=sorted(ledger_mod.VALID_EFFORTS),
+        default=ledger_mod.DEFAULT_EFFORT,
+        help="Reasoning effort dial (low|medium|high|xhigh|max). Default: high.",
+    )
     parser.add_argument("--shell", action="store_true", help="Allow shell syntax in --diagnostic (security warning)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--reset", action="store_true", help="Reset ledger to idle and exit")
@@ -393,6 +566,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
     )
     orch.use_shell = args.shell
+    orch.default_effort = args.effort
     return orch.run()
 
 

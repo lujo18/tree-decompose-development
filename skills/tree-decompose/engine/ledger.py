@@ -16,8 +16,11 @@ STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
 
 VALID_STATUSES = {STATUS_IDLE, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, STATUS_SKIPPED}
-VALID_KINDS = {"contract", "implementation", "test", "doc", "configuration"}
+VALID_KINDS = {"contract", "implementation", "test", "doc", "configuration", "reasoning"}
 VALID_TYPES = {"domain", "service", "module", "file", "functional_block", "test", "data_structure", "directory"}
+
+VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+DEFAULT_EFFORT = "high"
 
 
 @dataclass
@@ -35,6 +38,8 @@ class Node:
     error_log: Optional[str] = None
     retry_count: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    thinking_path: Optional[str] = None
+    effort: str = DEFAULT_EFFORT
 
     def __post_init__(self) -> None:
         if self.status not in VALID_STATUSES:
@@ -43,6 +48,11 @@ class Node:
             raise ValueError(f"Invalid kind '{self.kind}' for node {self.id}")
         if self.type not in VALID_TYPES:
             raise ValueError(f"Invalid type '{self.type}' for node {self.id}")
+        if self.effort not in VALID_EFFORTS:
+            raise ValueError(
+                f"Invalid effort '{self.effort}' for node {self.id}; "
+                f"must be one of {sorted(VALID_EFFORTS)}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +69,8 @@ class Node:
             "error_log": self.error_log,
             "retry_count": self.retry_count,
             "metadata": self.metadata,
+            "thinking_path": self.thinking_path,
+            "effort": self.effort,
         }
 
     def is_path_safe(self) -> bool:
@@ -87,7 +99,22 @@ class Node:
             error_log=data.get("error_log"),
             retry_count=data.get("retry_count", 0),
             metadata=dict(data.get("metadata", {})),
+            thinking_path=data.get("thinking_path"),
+            effort=data.get("effort", DEFAULT_EFFORT),
         )
+
+    @property
+    def is_reasoning_required(self) -> bool:
+        """True if this node should trigger the thinking phase.
+
+        Gating rule: explicit reasoning nodes, OR contract nodes with 3+
+        downstream dependents.
+        """
+        if self.kind == "reasoning":
+            return True
+        # Dependent count check is up to the ledger; this only signals kind-based
+        # triggering. Caller combines the two.
+        return False
 
     @property
     def is_terminal(self) -> bool:
@@ -288,3 +315,23 @@ class Ledger:
         if not self.nodes:
             return 0
         return max(n.depth_level for n in self.nodes.values())
+
+    def dependent_count(self, node_id: str) -> int:
+        """Count of nodes that directly depend on the given node."""
+        return sum(1 for n in self.nodes.values() if node_id in n.dependencies)
+
+    def reasoning_required_nodes(self) -> list[Node]:
+        """Nodes that must produce a thinking artifact before execution.
+
+        Gating rule: explicit reasoning kind, OR contract kind with >= 3
+        direct dependents. Ordering is by depth then id so the thinker
+        processes ancestors before descendants.
+        """
+        result = [
+            n
+            for n in self.nodes.values()
+            if n.kind == "reasoning"
+            or (n.kind == "contract" and self.dependent_count(n.id) >= 3)
+        ]
+        result.sort(key=lambda n: (n.depth_level, n.id))
+        return result

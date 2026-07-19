@@ -1,7 +1,5 @@
-# Runtime artifacts
-.prompts/
-outputs/
-state/ledger.json.tmp
+# Runtime workspace (all generated state lives here)
+.decompose/
 
 # Python
 __pycache__/
